@@ -4,18 +4,18 @@
  *
  */
 
-#ifdef BOARD_maple
+/* RFS
+1. Updated include/define portion for pcDuino.
+2. Changed char to signed char since ARM chars are unsigned by default. 
+3. Added SPI_CONTINUE, SPI_LAST to SPI::transfer method as needed.
+4. Replace memcpy_P with memcpy.
+*/
 
-#include "wirish.h"
-HardwareSPI SPI(1);
-#include "GD.h"
-
-#else
 #include "Arduino.h"
-#include <avr/pgmspace.h>
+//#include <pcduino.h>
 #include <SPI.h>
 #include <GD.h>
-#endif
+
 
 static byte GD_SEL_PIN;
 GDClass GD;
@@ -25,15 +25,13 @@ void GDClass::begin(int pin)
   delay(250); // give Gameduino time to boot
   GD_SEL_PIN = pin;
   pinMode(GD_SEL_PIN, OUTPUT);
-#ifdef BOARD_maple
-  SPI.begin(SPI_4_5MHZ, MSBFIRST, 0);
-#else
+
   SPI.begin();
   SPI.setClockDivider(SPI_CLOCK_DIV2);
   SPI.setBitOrder(MSBFIRST);
-  SPI.setDataMode(SPI_MODE0);
-  SPSR = (1 << SPI2X);
-#endif
+ SPI.setDataMode(SPI_MODE0);
+//  SPSR = (1 << SPI2X);  // RFS not needed for pcDuino
+
   digitalWrite(GD_SEL_PIN, HIGH);
 
   GD.wr(J1_RESET, 1);           // HALT coprocessor
@@ -66,8 +64,8 @@ void GDClass::end() {
 void GDClass::__start(unsigned int addr) // start an SPI transaction to addr
 {
   digitalWrite(GD_SEL_PIN, LOW);
-  SPI.transfer(highByte(addr));
-  SPI.transfer(lowByte(addr));  
+  SPI.transfer(highByte(addr),SPI_CONTINUE);
+  SPI.transfer(lowByte(addr),SPI_CONTINUE);  
 }
 
 void GDClass::__wstart(unsigned int addr) // start an SPI write transaction to addr
@@ -89,7 +87,7 @@ void GDClass::__end() // end the SPI transaction
 byte GDClass::rd(unsigned int addr)
 {
   __start(addr);
-  byte r = SPI.transfer(0);
+  byte r = SPI.transfer(0,SPI_LAST);
   __end();
   return r;
 }
@@ -97,7 +95,7 @@ byte GDClass::rd(unsigned int addr)
 void GDClass::wr(unsigned int addr, byte v)
 {
   __wstart(addr);
-  SPI.transfer(v);
+  SPI.transfer(v,SPI_LAST);
   __end();
 }
 
@@ -106,8 +104,8 @@ unsigned int GDClass::rd16(unsigned int addr)
   unsigned int r;
 
   __start(addr);
-  r = SPI.transfer(0);
-  r |= (SPI.transfer(0) << 8);
+  r = SPI.transfer(0,SPI_CONTINUE);
+  r |= (SPI.transfer(0,SPI_LAST) << 8);
   __end();
   return r;
 }
@@ -115,8 +113,8 @@ unsigned int GDClass::rd16(unsigned int addr)
 void GDClass::wr16(unsigned int addr, unsigned int v)
 {
   __wstart(addr);
-  SPI.transfer(lowByte(v));
-  SPI.transfer(highByte(v));
+  SPI.transfer(lowByte(v),SPI_CONTINUE);
+  SPI.transfer(highByte(v),SPI_LAST);
   __end();
 }
 
@@ -124,7 +122,7 @@ void GDClass::fill(int addr, byte v, unsigned int count)
 {
   __wstart(addr);
   while (count--)
-    SPI.transfer(v);
+    SPI.transfer(v,SPI_LAST);
   __end();
 }
 
@@ -132,7 +130,7 @@ void GDClass::copy(unsigned int addr, flash_uint8_t *src, int count)
 {
   __wstart(addr);
   while (count--) {
-    SPI.transfer(pgm_read_byte_near(src));
+    SPI.transfer(pgm_read_byte_near(src),SPI_CONTINUE);
     src++;
   }
   __end();
@@ -143,7 +141,7 @@ void GDClass::copy(unsigned int addr, uint_farptr_t src, int count)
 {
   __wstart(addr);
   while (count--) {
-    SPI.transfer(pgm_read_byte_far(src));
+    SPI.transfer(pgm_read_byte_far(src),SPI_CONTINUE);
     src++;
   }
   __end();
@@ -174,14 +172,14 @@ void GDClass::setpal(int pal, unsigned int rgb)
 void GDClass::sprite(int spr, int x, int y, byte image, byte palette, byte rot, byte jk)
 {
   __wstart(RAM_SPR + (spr << 2));
-  SPI.transfer(lowByte(x));
-  SPI.transfer((palette << 4) | (rot << 1) | (highByte(x) & 1));
-  SPI.transfer(lowByte(y));
-  SPI.transfer((jk << 7) | (image << 1) | (highByte(y) & 1));
+  SPI.transfer(lowByte(x),SPI_CONTINUE);
+  SPI.transfer((palette << 4) | (rot << 1) | (highByte(x) & 1),SPI_CONTINUE);
+  SPI.transfer(lowByte(y),SPI_CONTINUE);
+  SPI.transfer((jk << 7) | (image << 1) | (highByte(y) & 1),SPI_LAST);
   __end();
 }
 
-void GDClass::xsprite(int ox, int oy, char x, char y, byte image, byte palette, byte rot, byte jk)
+void GDClass::xsprite(int ox, int oy, signed char x, signed char y, byte image, byte palette, byte rot, byte jk)
 {
   if (rot & 2)
     x = -16-x;
@@ -191,21 +189,27 @@ void GDClass::xsprite(int ox, int oy, char x, char y, byte image, byte palette, 
       int s;
       s = x; x = y; y = s;
   }
+//  printf("orig ox=%d ",ox);
+//  printf("orig oy=%d ",oy);
+//  printf("x=%d ",x);
+//  printf("y=%d ",y);
   ox += x;
   oy += y;
-  SPI.transfer(lowByte(ox));
-  SPI.transfer((palette << 4) | (rot << 1) | (highByte(ox) & 1));
-  SPI.transfer(lowByte(oy));
-  SPI.transfer((jk << 7) | (image << 1) | (highByte(oy) & 1));
+//  printf("ox=%d ",ox);
+//  printf("oy=%d\n",oy);
+  SPI.transfer(lowByte(ox),SPI_CONTINUE);
+  SPI.transfer((palette << 4) | (rot << 1) | (highByte(ox) & 1),SPI_CONTINUE);
+  SPI.transfer(lowByte(oy),SPI_CONTINUE);
+  SPI.transfer((jk << 7) | (image << 1) | (highByte(oy) & 1),SPI_CONTINUE);
   spr++;
 }
 
 void GDClass::xhide()
 {
-  SPI.transfer(lowByte(400));
-  SPI.transfer(highByte(400));
-  SPI.transfer(lowByte(400));
-  SPI.transfer(highByte(400));
+  SPI.transfer(lowByte(400),SPI_CONTINUE);
+  SPI.transfer(highByte(400),SPI_CONTINUE);
+  SPI.transfer(lowByte(400),SPI_CONTINUE);
+  SPI.transfer(highByte(400),SPI_CONTINUE);
   spr++;
 }
 
@@ -213,7 +217,9 @@ void GDClass::plots(int ox, int oy, const PROGMEM sprplot *psp, byte count, byte
 {
   while (count--) {
     struct sprplot sp;
-    memcpy_P((void*)&sp, psp++, sizeof(sp));
+// RFS - don't need _P (PROGMEM) version
+//    memcpy_P((void*)&sp, psp++, sizeof(sp));
+    memcpy((void*)&sp, psp++, sizeof(sp));
     GD.xsprite(ox, oy, sp.x, sp.y, sp.image, sp.palette, rot, jk);
   }
 }
@@ -275,17 +281,17 @@ void GDClass::putstr(int x, int y, const char *s)
 {
   GD.__wstart((y << 6) + x);
   while (*s)
-    SPI.transfer(*s++);
+    SPI.transfer(*s++,SPI_CONTINUE);
   GD.__end();
 }
 
 void GDClass::voice(int v, byte wave, unsigned int freq, byte lamp, byte ramp)
 {
   __wstart(VOICES + (v << 2));
-  SPI.transfer(lowByte(freq));
-  SPI.transfer(highByte(freq) | (wave << 7));
-  SPI.transfer(lamp);
-  SPI.transfer(ramp);
+  SPI.transfer(lowByte(freq),SPI_CONTINUE);
+  SPI.transfer(highByte(freq) | (wave << 7),SPI_CONTINUE);
+  SPI.transfer(lamp,SPI_CONTINUE);
+  SPI.transfer(ramp,SPI_LAST);
   __end();
 }
 
