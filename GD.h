@@ -4,32 +4,32 @@
  *
  */
 
+/* RFS
+1. Updated include/define portion for pcDuino, i.e. include Arduino.h.
+2. Changed char to signed char since ARM chars are unsigned by default. 
+3. Added SPI_CONTINUE, SPI_LAST to SPI::transfer method as needed.
+*/
+
 #ifndef _GD_H_INCLUDED
 #define _GD_H_INCLUDED
 
-#ifdef BOARD_maple
-
-#include "wirish.h"
+#include "Arduino.h"
+#include <stdint.h>
+#include <stdarg.h>
 
 typedef const unsigned char prog_uchar;
-#define Serial SerialUSB
 #define pgm_read_byte_near(x) (*(prog_uchar*)x)
 #define pgm_read_byte(x) (*(prog_uchar*)x)
-#define PROGMEM const
-
-extern HardwareSPI SPI;
-
-#include <stdio.h>
-#include <stdint.h>
-#include <string.h>
-#endif
+#define pgm_read_word_near(x) (*(uint16_t*)x)  // RFS added
+#define PROGMEM 
 
 #define flash_uint8_t   const PROGMEM uint8_t
 #define flash_int8_t    const PROGMEM int8_t
 
+
 struct sprplot
 {
-  char x, y;
+  signed char x, y;
   byte image, palette;
 };
 
@@ -66,7 +66,7 @@ public:
   static void screenshot(unsigned int frame);
 
   void __wstartspr(unsigned int spr = 0);
-  void xsprite(int ox, int oy, char x, char y, byte image, byte palette, byte rot = 0, byte jk = 0);
+  void xsprite(int ox, int oy, signed char x, signed char y, byte image, byte palette, byte rot = 0, byte jk = 0);
   void xhide();
   void plots(int ox, int oy, const PROGMEM sprplot *psp, byte count, byte rot, byte jk);
 
@@ -198,14 +198,14 @@ class Asset {
     int read(void *dst, uint16_t n) {
       GD.wr(IOMODE, 'F');
       digitalWrite(FLASHSEL, LOW);
-      SPI.transfer(0x03);
-      SPI.transfer((byte)(addr >> 16));
-      SPI.transfer((byte)(addr >> 8));
-      SPI.transfer((byte)(addr >> 0));
+      SPI.transfer(0x03,SPI_CONTINUE);
+      SPI.transfer((byte)(addr >> 16),SPI_CONTINUE);
+      SPI.transfer((byte)(addr >> 8),SPI_CONTINUE);
+      SPI.transfer((byte)(addr >> 0),SPI_CONTINUE);
       uint16_t actual = min(n, remain);   // actual bytes read
       byte *bdst = (byte*)dst;
       for (uint16_t a = actual; a; a--) {
-        byte b = SPI.transfer(0);
+        byte b = SPI.transfer(0,SPI_CONTINUE);
         *bdst++ = b;
         addr++;
         if ((511 & (uint16_t)addr) == 264)
@@ -223,7 +223,7 @@ class Asset {
         read(buf, n);
         GD.__wstart(dst);
         for (byte i = 0; i < n; i++)
-          SPI.transfer(buf[i]);
+          SPI.transfer(buf[i],SPI_CONTINUE);
         GD.__end();
         dst += n;
       }
