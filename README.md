@@ -1,8 +1,7 @@
 # Gameduino library for pcDuino
 
-COMING SOON
-
-Modified GD.h, GD.cpp to allow compilng on pcDuino.
+Modified GD.h, GD.cpp to allow compiling on pcDuino.
+Tested with pcDuino3 Nano.
 
 Forked from jamesbowman/gd1
 
